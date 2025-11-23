@@ -94,30 +94,30 @@ class TransformerEncoder(layers.Layer):
         self.embed_dim = embed_dim
         self.dense_dim = dense_dim
         self.num_heads = num_heads
-        # Multi-Head Attention层
+        
         self.attention = MultiHeadAttention(num_heads=num_heads,
                                             key_dim=embed_dim)
-        # Feed Forward层
+        
         self.dense_proj = Sequential([Dense(dense_dim, activation='relu'),
                                       Dense(embed_dim),])
-        # Add&Norm层1
+        
         self.layernorm_1 = LayerNormalization()
-        # Add&Norm层2
+        
         self.layernorm_2 = LayerNormalization()
 
     def call(self, inputs):
-        # 首先经过Multi-Head Attention层
+        
         attention_output = self.attention(inputs, inputs)
-        # 经过Add&Norm层1
+        
         proj_input = self.layernorm_1(inputs + attention_output)
-        # 经过Feed Forward层
+       
         proj_output = self.dense_proj(proj_input)
-        # 经过Add&Norm层2
+        
         return self.layernorm_2(proj_input + proj_output)
 
 print('Build model...')
 
-inputs = [Input(shape=(length,), dtype='int32') for _ in range(6)]  # 注意：应为 int32（词索引）
+inputs = [Input(shape=(length,), dtype='int32') for _ in range(6)]
 
 pos_encoding = positional_embedding(length, 128)  # shape: (512, 128)
 
@@ -173,5 +173,6 @@ model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accur
 model.fit([X_train1, X_train2, X_train3, X_train4, X_train5, X_train6], y_train,
           batch_size=32, epochs=10,
           validation_data=([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6], y_test))
+
 
 classes = model.predict([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6])
