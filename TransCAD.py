@@ -1,0 +1,177 @@
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.layers import *
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.preprocessing import sequence
+from nltk import word_tokenize
+
+data = pd.DataFrame(pd.read_excel('Contracts.xlsx'))
+data['opcode'] = data['opcode'].str.replace('\n', ' ')
+
+cw = lambda x: list(word_tokenize(x))
+data['opcode'] = data['opcode'].apply(cw)
+
+from keras.preprocessing.text import Tokenizer
+tokenizer = Tokenizer()
+tokenizer.fit_on_texts(data['opcode'])
+data['opcode'] = tokenizer.texts_to_sequences(data['opcode'])
+
+words = tokenizer.word_index
+print(len(words)+1)
+
+avg_len = list(map(len, data['opcode']))
+print(np.mean(avg_len))
+
+maxlen = 3072
+print("Pad sequences (samples x time)")
+data['opcode'] = list(sequence.pad_sequences(data['opcode'], maxlen=maxlen, padding='post'))
+
+from sklearn.utils import shuffle
+data = shuffle(data, random_state=0)
+
+X = np.array(list(data['opcode']))
+y = np.array(list(data['label']))
+
+from imblearn.over_sampling import ADASYN
+adasyn = ADASYN(random_state=0)
+X_resampled, y_resampled = adasyn.fit_resample(X, y)
+
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled,
+                                                    test_size=0.2, random_state=0)
+
+y_train = to_categorical(y_train, 3)
+y_test = to_categorical(y_test, 3)
+
+length = 512
+X_train1 = X_train[:, 0:length]
+X_train2 = X_train[:, length:2 * length]
+X_train3 = X_train[:, 2 * length:3 * length]
+X_train4 = X_train[:, 3 * length:4 * length]
+X_train5 = X_train[:, 4 * length:5 * length]
+X_train6 = X_train[:, 5 * length:6 * length]
+
+X_test1 = X_test[:, 0:length]
+X_test2 = X_test[:, length:2 * length]
+X_test3 = X_test[:, 2 * length:3 * length]
+X_test4 = X_test[:, 3 * length:4 * length]
+X_test5 = X_test[:, 4 * length:5 * length]
+X_test6 = X_test[:, 5 * length:6 * length]
+
+def positional_embedding(maxlen, model_size):
+    PE = np.zeros((maxlen, model_size))
+    for i in range(maxlen):
+        for j in range(model_size):
+            if j % 2 == 0:
+                PE[i, j] = np.sin(i / 10000 ** (j / model_size))
+            else:
+                PE[i, j] = np.cos(i / 10000 ** ((j-1) / model_size))
+    PE = tf.constant(PE, dtype=tf.float32)
+    return PE
+
+class PositionalEmbedding(layers.Layer):
+    def __init__(self, vocab_size, model_size, input_length):
+        super(PositionalEmbedding, self).__init__()
+        self.vocab_size = vocab_size
+        self.model_size = model_size
+        self.input_length = input_length
+
+        self.embedding = Embedding(vocab_size, model_size)
+        self.pos_embedding = positional_embedding(input_length, model_size)
+
+    def call(self, x):
+        # input embedding + positional embedding
+        x = self.embedding(x) + self.pos_embedding
+        return x
+
+class TransformerEncoder(layers.Layer):
+    def __init__(self, embed_dim, dense_dim, num_heads, **kwargs):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.dense_dim = dense_dim
+        self.num_heads = num_heads
+        # Multi-Head Attention层
+        self.attention = MultiHeadAttention(num_heads=num_heads,
+                                            key_dim=embed_dim)
+        # Feed Forward层
+        self.dense_proj = Sequential([Dense(dense_dim, activation='relu'),
+                                      Dense(embed_dim),])
+        # Add&Norm层1
+        self.layernorm_1 = LayerNormalization()
+        # Add&Norm层2
+        self.layernorm_2 = LayerNormalization()
+
+    def call(self, inputs):
+        # 首先经过Multi-Head Attention层
+        attention_output = self.attention(inputs, inputs)
+        # 经过Add&Norm层1
+        proj_input = self.layernorm_1(inputs + attention_output)
+        # 经过Feed Forward层
+        proj_output = self.dense_proj(proj_input)
+        # 经过Add&Norm层2
+        return self.layernorm_2(proj_input + proj_output)
+
+print('Build model...')
+
+inputs = [Input(shape=(length,), dtype='int32') for _ in range(6)]  # 注意：应为 int32（词索引）
+
+pos_encoding = positional_embedding(length, 128)  # shape: (512, 128)
+
+class SharedPositionalEmbedding(layers.Layer):
+    def __init__(self, vocab_size, model_size, pos_encoding, **kwargs):
+        super().__init__(**kwargs)
+        self.embedding = layers.Embedding(vocab_size, model_size)
+        self.pos_encoding = pos_encoding
+
+    def call(self, x):
+        return self.embedding(x) + self.pos_encoding
+
+shared_embed = SharedPositionalEmbedding(len(words) + 1, 128, pos_encoding)
+
+conv_outputs = []
+
+transformer_outputs = []
+
+for i in range(6):
+
+    embed = shared_embed(inputs[i])
+
+    if i == 0:
+
+        trans = TransformerEncoder(embed_dim=128, dense_dim=32, num_heads=2)(embed)
+    else:
+
+        to_concat = conv_outputs + [embed]
+        concat = concatenate(to_concat, axis=-1)
+        proj = Dense(128)(concat)
+        trans = TransformerEncoder(embed_dim=128, dense_dim=32, num_heads=2)(proj)
+
+    transformer_outputs.append(trans)
+
+    if i < 5:
+        drop = Dropout(0.2)(trans)
+        conv_out = Conv1D(32, 3, padding='same', strides=1, activation='relu')(drop)
+        conv_outputs.append(conv_out)
+    else:
+
+        pass
+
+fusion = multiply(transformer_outputs)
+
+flat6 = Flatten()(fusion)
+drop6 = Dropout(0.2)(flat6)
+output6 = Dense(3, activation='softmax')(drop6)
+
+model = Model(inputs, output6)
+print(model.summary())
+
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+model.fit([X_train1, X_train2, X_train3, X_train4, X_train5, X_train6], y_train,
+          batch_size=32, epochs=10,
+          validation_data=([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6], y_test))
+
+classes = model.predict([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6])
