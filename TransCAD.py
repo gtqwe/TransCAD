@@ -116,63 +116,40 @@ class TransformerEncoder(layers.Layer):
         return self.layernorm_2(proj_input + proj_output)
 
 print('Build model...')
+inputs = [Input(shape=(length,), dtype='float32') for _ in range(6)]
 
-inputs = [Input(shape=(length,), dtype='int32') for _ in range(6)]
-
-pos_encoding = positional_embedding(length, 128)  # shape: (512, 128)
-
-class SharedPositionalEmbedding(layers.Layer):
-    def __init__(self, vocab_size, model_size, pos_encoding, **kwargs):
-        super().__init__(**kwargs)
-        self.embedding = layers.Embedding(vocab_size, model_size)
-        self.pos_encoding = pos_encoding
-
-    def call(self, x):
-        return self.embedding(x) + self.pos_encoding
-
-shared_embed = SharedPositionalEmbedding(len(words) + 1, 128, pos_encoding)
-
-conv_outputs = []
-
-transformer_outputs = []
+branch_outputs = []
+transformer_reps = []
 
 for i in range(6):
-
-    embed = shared_embed(inputs[i])
-
+    embed = PositionalEmbedding(len(words) + 1, 128, input_length=length)(inputs[i])
+    
     if i == 0:
-
-        trans = TransformerEncoder(embed_dim=128, dense_dim=32, num_heads=2)(embed)
+        x = embed
     else:
-
-        to_concat = conv_outputs + [embed]
-        concat = concatenate(to_concat, axis=-1)
-        proj = Dense(128)(concat)
-        trans = TransformerEncoder(embed_dim=128, dense_dim=32, num_heads=2)(proj)
-
-    transformer_outputs.append(trans)
-
+        x = concatenate(branch_outputs + [embed])
+        x = Dense(128)(x)
+    
+    trans = TransformerEncoder(embed_dim=128, dense_dim=32, num_heads=2)(x)
+    transformer_reps.append(trans)
+    
     if i < 5:
-        drop = Dropout(0.2)(trans)
-        conv_out = Conv1D(32, 3, padding='same', strides=1, activation='relu')(drop)
-        conv_outputs.append(conv_out)
-    else:
+        x = Dropout(0.2)(trans)
+        out = Convolution1D(32, 3, padding='same', strides=1, activation='relu')(x)
+        branch_outputs.append(out)
 
-        pass
+fusion = multiply(transformer_reps)
 
-fusion = multiply(transformer_outputs)
+flat = Flatten()(fusion)
+drop = Dropout(0.2)(flat)
+output = Dense(3, activation='softmax')(drop)
 
-flat6 = Flatten()(fusion)
-drop6 = Dropout(0.2)(flat6)
-output6 = Dense(3, activation='softmax')(drop6)
-
-model = Model(inputs, output6)
+model = Model(inputs, output)
 print(model.summary())
 
 model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 model.fit([X_train1, X_train2, X_train3, X_train4, X_train5, X_train6], y_train,
           batch_size=32, epochs=10,
           validation_data=([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6], y_test))
-
 
 classes = model.predict([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6])
