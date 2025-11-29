@@ -36,13 +36,14 @@ data = shuffle(data, random_state=0)
 X = np.array(list(data['opcode']))
 y = np.array(list(data['label']))
 
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
+                                                    stratify=y, random_state=0)
+
 from imblearn.over_sampling import ADASYN
 adasyn = ADASYN(random_state=0)
-X_resampled, y_resampled = adasyn.fit_resample(X, y)
-
-from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled,
-                                                    test_size=0.2, random_state=0)
+X_train, y_train = adasyn.fit_resample(X_train, y_train)
+X_test, y_test = adasyn.fit_resample(X_test, y_test)
 
 y_train = to_categorical(y_train, 3)
 y_test = to_categorical(y_test, 3)
@@ -153,3 +154,4 @@ model.fit([X_train1, X_train2, X_train3, X_train4, X_train5, X_train6], y_train,
           validation_data=([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6], y_test))
 
 classes = model.predict([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6])
+
