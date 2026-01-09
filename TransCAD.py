@@ -9,7 +9,7 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.preprocessing import sequence
 from nltk import word_tokenize
 
-data = pd.DataFrame(pd.read_excel('Contracts.xlsx'))
+data = pd.read_excel('Contracts.xlsx')
 data['opcode'] = data['opcode'].str.replace('\n', ' ')
 
 cw = lambda x: list(word_tokenize(x))
@@ -150,8 +150,6 @@ print(model.summary())
 
 model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 model.fit([X_train1, X_train2, X_train3, X_train4, X_train5, X_train6], y_train,
-          batch_size=32, epochs=10,
-          validation_data=([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6], y_test))
+          batch_size=32, epochs=10)
 
 classes = model.predict([X_test1, X_test2, X_test3, X_test4, X_test5, X_test6])
-
